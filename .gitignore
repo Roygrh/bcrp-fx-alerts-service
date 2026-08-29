@@ -1,0 +1,25 @@
+# sbt / Scala
+target/
+project/target/
+project/project/
+.bsp/
+.bloop/
+.metals/
+metals.sbt
+.scala-build/
+*.class
+*.log
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Entorno local (nunca versionar secretos)
+.env
+.env.*
+!.env.example
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
