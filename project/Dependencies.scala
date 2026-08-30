@@ -15,6 +15,7 @@ object Dependencies {
     val logback         = "1.6.3"
     val munit           = "1.3.5"
     val munitCatsEffect = "2.2.0"
+    val testcontainers  = "2.0.5"
   }
 
   val catsEffect: ModuleID = "org.typelevel" %% "cats-effect" % Versions.catsEffect
@@ -64,6 +65,11 @@ object Dependencies {
   val tests: Seq[ModuleID] = Seq(
     "org.scalameta" %% "munit"             % Versions.munit,
     "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect
+  ).map(_ % Test)
+
+  // Solo para el subproyecto `integration`: PostgreSQL efímero en Docker durante las pruebas.
+  val integrationTests: Seq[ModuleID] = Seq(
+    "org.testcontainers" % "testcontainers-postgresql" % Versions.testcontainers
   ).map(_ % Test)
 
   val all: Seq[ModuleID] =

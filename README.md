@@ -9,8 +9,9 @@ PostgreSQL 16 como base de datos. Las decisiones de arquitectura se documentan e
 [`docs/adr`](docs/adr).
 
 > Estado actual: esqueleto del servicio (endpoint `/health`, Swagger UI, migraciones y
-> configuración por entorno). El modelo de alertas, el cliente BCRP y la seguridad se
-> incorporan en pasos posteriores.
+> configuración por entorno) y modelo de dominio de alertas con su persistencia en PostgreSQL
+> (`domain/alert`, `AlertService`, `AlertRepository`). Los endpoints HTTP de alertas, el cliente
+> BCRP y la seguridad se incorporan en pasos posteriores.
 
 ## Requisitos previos
 
@@ -62,9 +63,23 @@ PostgreSQL 16 como base de datos. Las decisiones de arquitectura se documentan e
 
 ## Pruebas
 
+Las pruebas unitarias no necesitan ninguna infraestructura:
+
 ```bash
 sbt test
 ```
+
+Las pruebas de integración del repositorio corren contra un PostgreSQL efímero que
+[Testcontainers](https://testcontainers.com/) levanta con la misma imagen de `docker-compose.yml`
+y al que aplica las migraciones reales de Flyway. Viven en el subproyecto `integration`, que
+`sbt test` no ejecuta, de modo que solo requieren Docker cuando se invocan explícitamente:
+
+```bash
+sbt integration/test
+```
+
+No dependen de `.env` ni de la instancia de `docker compose`: cada ejecución parte de una base
+de datos limpia en un puerto libre y el contenedor se elimina al terminar.
 
 ## Estructura
 
@@ -72,9 +87,16 @@ sbt test
 src/main/scala/pe/quiroz/fxalerts
 ├── Main.scala           # arranque y composición de dependencias
 ├── domain               # modelos y errores de dominio
+│   └── alert            # Alert, identificadores, umbral, serie BCRP, dirección y estado
 ├── application          # servicios de aplicación y puertos
+│   ├── alert            # AlertService, AlertRepository (puerto) y comandos
+│   └── health
 └── infrastructure
     ├── http             # endpoints Tapir, rutas http4s, servidor Ember, Swagger UI
-    ├── persistence      # transactor doobie/HikariCP, migraciones Flyway
+    ├── persistence      # transactor doobie/HikariCP, migraciones Flyway, DoobieAlertRepository
     └── config           # carga de configuración desde variables de entorno (ciris)
+
+src/main/resources/db/migration   # migraciones Flyway (V1 control, V2 tabla alerts)
+src/test                           # pruebas unitarias (munit), sin infraestructura
+integration/src/test               # pruebas de integración contra PostgreSQL (Testcontainers)
 ```
