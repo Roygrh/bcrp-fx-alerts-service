@@ -21,7 +21,9 @@ class HealthRoutesSuite extends CatsEffectSuite:
   private def httpApp(databasePing: IO[Unit]): HttpApp[IO] =
     val databaseCheck = new DatabaseHealthCheck[IO]:
       def ping: IO[Unit] = databasePing
-    HttpApi.httpApp[IO](HealthRoutes[IO](HealthService[IO](databaseCheck, 1.second)))
+    HttpApi.fromEndpoints[IO](
+      HealthRoutes[IO](HealthService[IO](databaseCheck, 1.second)).serverEndpoints
+    )
 
   test("GET /health responde 200 con status UP cuando la base de datos responde"):
     val request = Request[IO](Method.GET, uri"/health")

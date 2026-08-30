@@ -4,12 +4,15 @@ import cats.effect.{IO, IOApp, Resource}
 import org.http4s.server.Server
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import pe.quiroz.fxalerts.application.alert.AlertService
 import pe.quiroz.fxalerts.application.health.HealthService
 import pe.quiroz.fxalerts.infrastructure.config.{AppConfig, ConfigLoader}
+import pe.quiroz.fxalerts.infrastructure.http.alert.AlertRoutes
 import pe.quiroz.fxalerts.infrastructure.http.health.HealthRoutes
 import pe.quiroz.fxalerts.infrastructure.http.{HttpApi, HttpServer}
 import pe.quiroz.fxalerts.infrastructure.persistence.{
   Database,
+  DoobieAlertRepository,
   DoobieDatabaseHealthCheck,
   FlywayMigrator
 }
@@ -33,7 +36,11 @@ object Main extends IOApp.Simple:
         DoobieDatabaseHealthCheck[IO](transactor),
         databaseHealthTimeout
       )
-      httpApp = HttpApi.httpApp[IO](HealthRoutes[IO](healthService))
+      alertService = AlertService[IO](DoobieAlertRepository[IO](transactor))
+      httpApp      = HttpApi.httpApp[IO](
+        HealthRoutes[IO](healthService),
+        AlertRoutes[IO](alertService)
+      )
       server <- HttpServer.resource[IO](config.http, httpApp)
       _      <- Resource.eval(
         Logger[IO].info(

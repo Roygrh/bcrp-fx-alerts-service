@@ -9,7 +9,10 @@ lazy val commonSettings = Seq(
     "-unchecked",
     "-Wunused:all",
     "-Wvalue-discard",
-    "-Wnonunit-statement"
+    "-Wnonunit-statement",
+    // Los avisos son errores: en particular, un `match` no exhaustivo sobre una jerarquía
+    // sellada (p. ej. DomainError -> respuestas HTTP) debe romper la compilación.
+    "-Werror"
   ),
   Test / fork := true,
   testFrameworks += new TestFramework("munit.Framework")

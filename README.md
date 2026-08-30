@@ -9,9 +9,10 @@ PostgreSQL 16 como base de datos. Las decisiones de arquitectura se documentan e
 [`docs/adr`](docs/adr).
 
 > Estado actual: esqueleto del servicio (endpoint `/health`, Swagger UI, migraciones y
-> configuración por entorno) y modelo de dominio de alertas con su persistencia en PostgreSQL
-> (`domain/alert`, `AlertService`, `AlertRepository`). Los endpoints HTTP de alertas, el cliente
-> BCRP y la seguridad se incorporan en pasos posteriores.
+> configuración por entorno), modelo de dominio de alertas con su persistencia en PostgreSQL y
+> CRUD de alertas expuesto por HTTP bajo `/api/v1/alerts`, con errores en formato Problem
+> Details (RFC 7807) y correlación por `X-Request-Id`. El cliente BCRP, la evaluación de
+> alertas y la seguridad se incorporan en pasos posteriores.
 
 ## Requisitos previos
 
@@ -59,6 +60,7 @@ PostgreSQL 16 como base de datos. Las decisiones de arquitectura se documentan e
 4. Verificar:
 
    - `GET http://localhost:8080/health` → `{"status":"UP","database":{"status":"UP"}}`
+   - `GET http://localhost:8080/api/v1/alerts` → `{"items":[]}` con la base de datos recién creada
    - `http://localhost:8080/docs` → Swagger UI generado desde las definiciones Tapir
 
 ## Pruebas
@@ -92,7 +94,7 @@ src/main/scala/pe/quiroz/fxalerts
 │   ├── alert            # AlertService, AlertRepository (puerto) y comandos
 │   └── health
 └── infrastructure
-    ├── http             # endpoints Tapir, rutas http4s, servidor Ember, Swagger UI
+    ├── http             # endpoints Tapir (health y alerts), Problem Details, middleware, Swagger UI
     ├── persistence      # transactor doobie/HikariCP, migraciones Flyway, DoobieAlertRepository
     └── config           # carga de configuración desde variables de entorno (ciris)
 
