@@ -1,7 +1,13 @@
 package pe.quiroz.fxalerts.infrastructure.http.alert
 
 import io.circe.{Decoder, Encoder}
-import pe.quiroz.fxalerts.domain.alert.{AlertStatus, BcrpSeries, CrossingDirection}
+import pe.quiroz.fxalerts.domain.alert.{
+  AlertOutcome,
+  AlertStatus,
+  BcrpSeries,
+  CrossingDirection,
+  EvaluationBasis
+}
 import sttp.tapir.Schema
 
 /**
@@ -47,6 +53,51 @@ object AlertJson:
   given Schema[AlertStatus] = Schema
     .derivedEnumeration[AlertStatus](encode = Some(wireStatus))
     .description("Estado de la alerta: solo las activas se evalúan")
+
+  /**
+   * El resultado de la evaluación se nombra explícitamente en el contrato (no a partir del nombre
+   * del caso) porque los consumidores discriminan por él y no debe cambiar si el dominio renombra
+   * un caso.
+   */
+  private def wireOutcome(value: AlertOutcome): String =
+    value match
+      case AlertOutcome.Triggered      => "TRIGGERED"
+      case AlertOutcome.NotTriggered   => "NOT_TRIGGERED"
+      case AlertOutcome.Inactive       => "INACTIVE"
+      case AlertOutcome.SeriesMismatch => "SERIES_MISMATCH"
+
+  given Encoder[AlertOutcome] = Encoder.encodeString.contramap(wireOutcome)
+
+  given Decoder[AlertOutcome] =
+    enumDecoder("el resultado de la evaluación", AlertOutcome.values.toList, wireOutcome)
+
+  given Schema[AlertOutcome] = Schema
+    .derivedEnumeration[AlertOutcome](encode = Some(wireOutcome))
+    .description(
+      "TRIGGERED: el valor cruzó el umbral en el sentido configurado; NOT_TRIGGERED: no lo " +
+        "cruzó; INACTIVE: la alerta está inactiva y no se evaluó; SERIES_MISMATCH: la alerta " +
+        "observa otra serie y no se evaluó"
+    )
+
+  private def wireBasis(value: EvaluationBasis): String =
+    value match
+      case EvaluationBasis.OfficialConfirmed => "OFFICIAL_CONFIRMED"
+      case EvaluationBasis.MarketReference   => "MARKET_REFERENCE"
+      case EvaluationBasis.Unconfirmed       => "UNCONFIRMED"
+
+  given Encoder[EvaluationBasis] = Encoder.encodeString.contramap(wireBasis)
+
+  given Decoder[EvaluationBasis] =
+    enumDecoder("la base de la evaluación", EvaluationBasis.values.toList, wireBasis)
+
+  given Schema[EvaluationBasis] = Schema
+    .derivedEnumeration[EvaluationBasis](encode = Some(wireBasis))
+    .description(
+      "Calidad del dato sobre el que se evaluaron las alertas. OFFICIAL_CONFIRMED: precio " +
+        "oficial confirmado por su fuente dentro del periodo de validez (la única base " +
+        "concluyente); MARKET_REFERENCE: referencia de mercado no oficial, confirmada; " +
+        "UNCONFIRMED: último valor conocido, ninguna fuente pudo confirmarlo"
+    )
 
   private def enumDecoder[E](label: String, values: List[E], wire: E => String): Decoder[E] =
     val admitted = values.map(wire).mkString(", ")

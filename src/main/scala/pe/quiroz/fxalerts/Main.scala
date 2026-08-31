@@ -4,7 +4,7 @@ import cats.effect.{IO, IOApp, Resource}
 import org.http4s.server.Server
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import pe.quiroz.fxalerts.application.alert.AlertService
+import pe.quiroz.fxalerts.application.alert.{AlertEvaluationService, AlertService}
 import pe.quiroz.fxalerts.application.health.HealthService
 import pe.quiroz.fxalerts.application.rate.ExchangeRateService
 import pe.quiroz.fxalerts.application.security.{TokenPolicy, TokenService}
@@ -72,10 +72,12 @@ object Main extends IOApp.Simple:
         rateService,
         rateSourceHealthTimeout
       )
-      alertService = AlertService[IO](DoobieAlertRepository[IO](transactor))
-      jwt          = config.security.jwt
-      tokens       = JwtTokens[IO](Rs256Jwt(jwt.keys, jwt.issuer, jwt.audience))
-      registry     = StaticClientRegistry[IO](config.security.clients)
+      alertRepository = DoobieAlertRepository[IO](transactor)
+      alertService    = AlertService[IO](alertRepository)
+      evaluation      = AlertEvaluationService[IO](alertRepository, rateService)
+      jwt             = config.security.jwt
+      tokens          = JwtTokens[IO](Rs256Jwt(jwt.keys, jwt.issuer, jwt.audience))
+      registry        = StaticClientRegistry[IO](config.security.clients)
       tokenService <- Resource.eval(
         TokenService[IO](
           registry,
@@ -94,7 +96,7 @@ object Main extends IOApp.Simple:
       httpApp = HttpApi.httpApp[IO](
         HealthRoutes[IO](healthService),
         TokenRoutes[IO](tokenService),
-        AlertRoutes[IO](alertService, auth),
+        AlertRoutes[IO](alertService, evaluation, auth),
         RateRoutes[IO](rateService, auth),
         auth
       )

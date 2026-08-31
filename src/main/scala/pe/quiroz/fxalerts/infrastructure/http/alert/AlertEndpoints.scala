@@ -25,6 +25,11 @@ import java.util.UUID
  * `alerts:write`. El recurso está acotado al cliente autenticado: no existe forma de nombrar a otro
  * cliente, ni al crear (el propietario es el sujeto del token) ni al listar (solo las propias), y
  * una alerta ajena responde 404 exactamente igual que una inexistente.
+ *
+ * `evaluation` es un subrecurso de solo lectura de la colección ("mis alertas frente al tipo de
+ * cambio vigente"): se lee con `alerts:read`, el mismo alcance que la propia colección, porque no
+ * revela nada sobre las alertas que ese alcance no revele ya, y el tipo de cambio que incorpora es
+ * el contexto necesario para interpretar el resultado.
  */
 object AlertEndpoints:
 
@@ -78,6 +83,54 @@ object AlertEndpoints:
           "Devuelve las alertas del cliente autenticado ordenadas por fecha de creación ascendente."
         )
         .out(jsonBody[AlertListResponse].example(AlertListResponse.example))
+    )
+
+  val evaluate: SecuredEndpoint[Unit, AlertEvaluationResponse] =
+    SecuredEndpoint(Scope.AlertsRead)(
+      base.get
+        .in("evaluation")
+        .summary("Evalúa las alertas propias contra el tipo de cambio vigente")
+        .description(
+          "Cruza el último tipo de cambio disponible de la serie de referencia con todas las " +
+            "alertas del cliente autenticado y devuelve el resultado de cada una. `ABOVE` se " +
+            "dispara cuando el valor es estrictamente mayor que el umbral y `BELOW` cuando es " +
+            "estrictamente menor: un valor igual al umbral no dispara en ningún sentido. Una " +
+            "alerta `INACTIVE` o de otra serie no se evalúa y lo indica en `outcome`. La " +
+            "evaluación no se persiste ni genera notificaciones; se recalcula en cada llamada.\n\n" +
+            "`rate` es el dato usado, con la misma representación que `GET /api/v1/rates/current` " +
+            "(procedencia en `source`, frescura en `freshness`). `basis` y `conclusive` resumen " +
+            "su calidad como fundamento para actuar: solo `OFFICIAL_CONFIRMED` (precio oficial " +
+            "confirmado por su fuente dentro del periodo de validez) es concluyente; " +
+            "`MARKET_REFERENCE` (respaldo no oficial) y `UNCONFIRMED` (último valor conocido, " +
+            "ninguna fuente responde) no lo son. El servicio no aplica ninguna política sobre los " +
+            "casos no concluyentes: expone la información y deja la decisión al consumidor.\n\n" +
+            "Se devuelven todas las alertas con su resultado, no solo las disparadas; un cliente " +
+            "sin alertas recibe 200 con `items` vacío. Responde 404 si no hay dato publicado en " +
+            "la ventana consultada y 503 si ninguna fuente responde y no hay dato en caché: sin " +
+            "tipo de cambio no hay evaluación posible."
+        )
+        .out(
+          jsonBody[AlertEvaluationResponse].examples(
+            List(
+              EndpointIO.Example.of(
+                AlertEvaluationResponse.example,
+                name = Some("Precio oficial confirmado (concluyente)")
+              ),
+              EndpointIO.Example.of(
+                AlertEvaluationResponse.exampleMarketReference,
+                name = Some("Referencia de mercado no oficial (no concluyente)")
+              ),
+              EndpointIO.Example.of(
+                AlertEvaluationResponse.exampleUnconfirmed,
+                name = Some("Dato sin confirmar, ninguna fuente responde (no concluyente)")
+              ),
+              EndpointIO.Example.of(
+                AlertEvaluationResponse.exampleEmpty,
+                name = Some("Cliente sin alertas")
+              )
+            )
+          )
+        )
     )
 
   val getById: SecuredEndpoint[UUID, AlertResponse] =

@@ -11,7 +11,12 @@ import org.http4s.{Header, HttpApp, MediaType, Method, Request, Response, Status
 import org.typelevel.ci.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import pe.quiroz.fxalerts.application.alert.{AlertService, InMemoryAlertRepository}
+import pe.quiroz.fxalerts.application.alert.{
+  AlertEvaluationService,
+  AlertService,
+  InMemoryAlertRepository
+}
+import pe.quiroz.fxalerts.application.rate.{ExchangeRateService, StubExchangeRateSource}
 import pe.quiroz.fxalerts.application.security.Scope
 import pe.quiroz.fxalerts.infrastructure.http.HttpApi
 import pe.quiroz.fxalerts.infrastructure.http.auth.TestTokens
@@ -48,10 +53,16 @@ class AlertRoutesSuite extends CatsEffectSuite:
   )
 
   private def withApp[A](body: HttpApp[IO] => IO[A]): IO[A] =
-    InMemoryAlertRepository.empty.flatMap { repository =>
-      val routes = AlertRoutes[IO](AlertService[IO](repository), TestTokens.auth)
-      body(HttpApi.fromEndpoints[IO](routes.serverEndpoints))
-    }
+    for
+      repository <- InMemoryAlertRepository.empty
+      source     <- StubExchangeRateSource(StubExchangeRateSource.freshSample)
+      routes = AlertRoutes[IO](
+        AlertService[IO](repository),
+        AlertEvaluationService[IO](repository, ExchangeRateService[IO](source)),
+        TestTokens.auth
+      )
+      result <- body(HttpApi.fromEndpoints[IO](routes.serverEndpoints))
+    yield result
 
   private def jsonRequest(method: Method, uri: Uri, body: Json): Request[IO] =
     Request[IO](method, uri)

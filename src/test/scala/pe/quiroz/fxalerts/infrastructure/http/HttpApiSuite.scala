@@ -7,7 +7,11 @@ import org.http4s.implicits.*
 import org.http4s.{HttpApp, Method, Request, Status, UrlForm}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import pe.quiroz.fxalerts.application.alert.{AlertService, InMemoryAlertRepository}
+import pe.quiroz.fxalerts.application.alert.{
+  AlertEvaluationService,
+  AlertService,
+  InMemoryAlertRepository
+}
 import pe.quiroz.fxalerts.application.health.{DatabaseHealthCheck, HealthService}
 import pe.quiroz.fxalerts.application.rate.{ExchangeRateService, StubExchangeRateSource}
 import pe.quiroz.fxalerts.application.security.{RegisteredClient, Scope, TokenPolicy, TokenService}
@@ -52,7 +56,11 @@ class HttpApiSuite extends CatsEffectSuite:
     yield HttpApi.httpApp[IO](
       HealthRoutes[IO](HealthService[IO](databaseCheck, 1.second, rateService, 1.second)),
       TokenRoutes[IO](tokenService),
-      AlertRoutes[IO](AlertService[IO](repository), TestTokens.auth),
+      AlertRoutes[IO](
+        AlertService[IO](repository),
+        AlertEvaluationService[IO](repository, rateService),
+        TestTokens.auth
+      ),
       RateRoutes[IO](rateService, TestTokens.auth),
       TestTokens.auth
     )
@@ -82,10 +90,12 @@ class HttpApiSuite extends CatsEffectSuite:
   test("las rutas de negocio exigen token"):
     app.flatMap { app =>
       for
-        alerts <- app.run(Request[IO](Method.GET, uri"/api/v1/alerts"))
-        rates  <- app.run(Request[IO](Method.GET, uri"/api/v1/rates/current"))
+        alerts     <- app.run(Request[IO](Method.GET, uri"/api/v1/alerts"))
+        evaluation <- app.run(Request[IO](Method.GET, uri"/api/v1/alerts/evaluation"))
+        rates      <- app.run(Request[IO](Method.GET, uri"/api/v1/rates/current"))
       yield
         assertEquals(alerts.status, Status.Unauthorized)
+        assertEquals(evaluation.status, Status.Unauthorized)
         assertEquals(rates.status, Status.Unauthorized)
     }
 
@@ -109,11 +119,15 @@ class HttpApiSuite extends CatsEffectSuite:
         alerts <- app.run(
           TestTokens.withBearer(Request[IO](Method.GET, uri"/api/v1/alerts"))(token)
         )
+        evaluation <- app.run(
+          TestTokens.withBearer(Request[IO](Method.GET, uri"/api/v1/alerts/evaluation"))(token)
+        )
         rates <- app.run(
           TestTokens.withBearer(Request[IO](Method.GET, uri"/api/v1/rates/current"))(token)
         )
       yield
         assertEquals(alerts.status, Status.Ok)
+        assertEquals(evaluation.status, Status.Ok)
         assertEquals(rates.status, Status.Ok)
     }
 
