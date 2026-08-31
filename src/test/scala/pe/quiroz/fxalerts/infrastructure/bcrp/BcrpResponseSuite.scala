@@ -7,7 +7,10 @@ import pe.quiroz.fxalerts.domain.rate.{ExchangeRate, RateProvider}
 import java.time.LocalDate
 import scala.io.Source
 
-/** Parseo de la respuesta del BCRP sin red: el ejemplo capturado vive en `src/test/resources`. */
+/**
+ * Parseo de la respuesta del BCRP sin red. La captura real y la muestra sintética de días sin dato
+ * viven en `src/test/resources/bcrp` (ver su README).
+ */
 class BcrpResponseSuite extends FunSuite:
 
   private val series = BcrpSeries.UsdPenSbsSell
@@ -18,27 +21,42 @@ class BcrpResponseSuite extends FunSuite:
     try Source.fromInputStream(stream, "UTF-8").mkString
     finally stream.close()
 
-  private val sample = fixture("PD04640PD-2026-08-20_2026-08-30.json")
+  /** Captura real de la API (obtenida el 2026-08-31); todos sus periodos traen dato. */
+  private val sample = fixture("PD04640PD-2026-08-24_2026-08-28.json")
+
+  /** Muestra sintética (ver README): cubre los días sin dato ("n.d."), que la captura no trae. */
+  private val synthetic = fixture("PD04640PD-sintetico-dias-sin-dato.json")
 
   test("decodifica la respuesta real: metadatos, periodos y valores"):
     val response = BcrpResponse.parse(sample).fold(fail(_), identity)
-    assertEquals(response.periods.size, 11)
+    assertEquals(response.periods.size, 5)
     assertEquals(response.config.flatMap(_.series.headOption).map(_.dec), Some(Some("3")))
     assertEquals(
       response.periods.head,
-      BcrpPeriod("20.Ago.26", List(BcrpValue.Published(BigDecimal("3.528"))))
+      BcrpPeriod("24.Ago.26", List(BcrpValue.Published(BigDecimal("3.356"))))
+    )
+
+  test("el último dato publicado de la captura real es el del 28 de agosto"):
+    val latest = BcrpResponse.parse(sample).flatMap(BcrpResponse.latestPublished(_, series))
+    assertEquals(
+      latest,
+      Right(
+        Some(
+          ExchangeRate(series, LocalDate.of(2026, 8, 28), BigDecimal("3.356"), RateProvider.Bcrp)
+        )
+      )
     )
 
   test("los días sin dato (\"n.d.\") se modelan como NotAvailable, nunca como cero"):
-    val response = BcrpResponse.parse(sample).fold(fail(_), identity)
+    val response = BcrpResponse.parse(synthetic).fold(fail(_), identity)
     val weekend  = response.periods.filter(p => Set("22.Ago.26", "23.Ago.26").contains(p.name))
     assertEquals(
       weekend.map(_.values),
       List(List(BcrpValue.NotAvailable), List(BcrpValue.NotAvailable))
     )
 
-  test("el último dato publicado ignora los periodos \"n.d.\" posteriores"):
-    val latest = BcrpResponse.parse(sample).flatMap(BcrpResponse.latestPublished(_, series))
+  test("el último dato publicado ignora los periodos \"n.d.\" posteriores (muestra sintética)"):
+    val latest = BcrpResponse.parse(synthetic).flatMap(BcrpResponse.latestPublished(_, series))
     assertEquals(
       latest,
       Right(

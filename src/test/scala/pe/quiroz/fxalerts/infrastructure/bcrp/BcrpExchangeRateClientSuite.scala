@@ -43,7 +43,7 @@ class BcrpExchangeRateClientSuite extends CatsEffectSuite:
   )
 
   private val sampleBody: String =
-    val stream = getClass.getResourceAsStream("/bcrp/PD04640PD-2026-08-20_2026-08-30.json")
+    val stream = getClass.getResourceAsStream("/bcrp/PD04640PD-2026-08-24_2026-08-28.json")
     try Source.fromInputStream(stream, "UTF-8").mkString
     finally stream.close()
 
@@ -86,7 +86,7 @@ class BcrpExchangeRateClientSuite extends CatsEffectSuite:
         val snapshot = result.fold(e => fail(s"Se esperaba un dato: $e"), identity)
         assertEquals(snapshot.rate.series, series)
         assertEquals(snapshot.rate.date, LocalDate.of(2026, 8, 28))
-        assertEquals(snapshot.rate.value, BigDecimal("3.523"))
+        assertEquals(snapshot.rate.value, BigDecimal("3.356"))
         assertEquals(snapshot.freshness, Freshness.Fresh)
         assertEquals(snapshot.rate.provider, RateProvider.Bcrp)
         assert(snapshot.rate.official)
