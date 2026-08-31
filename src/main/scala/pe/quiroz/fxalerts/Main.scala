@@ -7,12 +7,14 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pe.quiroz.fxalerts.application.alert.AlertService
 import pe.quiroz.fxalerts.application.health.HealthService
 import pe.quiroz.fxalerts.application.rate.ExchangeRateService
+import pe.quiroz.fxalerts.application.security.{TokenPolicy, TokenService}
 import pe.quiroz.fxalerts.domain.rate.RateProvider
 import pe.quiroz.fxalerts.infrastructure.bcrp.BcrpExchangeRateClient
 import pe.quiroz.fxalerts.infrastructure.cache.CachedExchangeRateSource
 import pe.quiroz.fxalerts.infrastructure.config.{AppConfig, ConfigLoader}
 import pe.quiroz.fxalerts.infrastructure.erapi.ExchangeRateApiClient
 import pe.quiroz.fxalerts.infrastructure.http.alert.AlertRoutes
+import pe.quiroz.fxalerts.infrastructure.http.auth.{BearerAuthentication, TokenRoutes}
 import pe.quiroz.fxalerts.infrastructure.http.health.HealthRoutes
 import pe.quiroz.fxalerts.infrastructure.http.rate.RateRoutes
 import pe.quiroz.fxalerts.infrastructure.http.{HttpApi, HttpServer}
@@ -24,6 +26,8 @@ import pe.quiroz.fxalerts.infrastructure.persistence.{
 }
 import pe.quiroz.fxalerts.infrastructure.rate.{FallbackExchangeRateSource, ProviderSource}
 import pe.quiroz.fxalerts.infrastructure.remote.RemoteHttpClient
+import pe.quiroz.fxalerts.infrastructure.security.jwt.{JwtTokens, Rs256Jwt}
+import pe.quiroz.fxalerts.infrastructure.security.{Pbkdf2SecretHasher, StaticClientRegistry}
 
 import scala.concurrent.duration.*
 
@@ -69,10 +73,30 @@ object Main extends IOApp.Simple:
         rateSourceHealthTimeout
       )
       alertService = AlertService[IO](DoobieAlertRepository[IO](transactor))
-      httpApp      = HttpApi.httpApp[IO](
+      jwt          = config.security.jwt
+      tokens       = JwtTokens[IO](Rs256Jwt(jwt.keys, jwt.issuer, jwt.audience))
+      registry     = StaticClientRegistry[IO](config.security.clients)
+      tokenService <- Resource.eval(
+        TokenService[IO](
+          registry,
+          Pbkdf2SecretHasher[IO](),
+          tokens,
+          TokenPolicy(jwt.issuer, jwt.audience, jwt.ttl)
+        )
+      )
+      _ <- Resource.eval(
+        Logger[IO].info(
+          s"Seguridad: ${registry.size} cliente(s) registrado(s); tokens RS256 (${jwt.keys.bits} " +
+            s"bits) emitidos por '${jwt.issuer}' para '${jwt.audience}' con vida ${jwt.ttl}"
+        )
+      )
+      auth    = BearerAuthentication[IO](tokens)
+      httpApp = HttpApi.httpApp[IO](
         HealthRoutes[IO](healthService),
-        AlertRoutes[IO](alertService),
-        RateRoutes[IO](rateService)
+        TokenRoutes[IO](tokenService),
+        AlertRoutes[IO](alertService, auth),
+        RateRoutes[IO](rateService, auth),
+        auth
       )
       server <- HttpServer.resource[IO](config.http, httpApp)
       _      <- Resource.eval(

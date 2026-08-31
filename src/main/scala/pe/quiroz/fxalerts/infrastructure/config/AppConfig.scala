@@ -4,7 +4,9 @@ import cats.data.NonEmptyList
 import ciris.Secret
 import com.comcast.ip4s.{Host, Port}
 import org.http4s.Uri
+import pe.quiroz.fxalerts.application.security.RegisteredClient
 import pe.quiroz.fxalerts.domain.rate.RateProvider
+import pe.quiroz.fxalerts.infrastructure.security.SigningKeys
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -86,11 +88,34 @@ final case class RateCacheConfig(
     failureBackoff: FiniteDuration
 )
 
+/**
+ * Parámetros de los tokens de acceso.
+ *
+ * @param keys
+ *   par RSA con el que se firman (privada) y verifican (pública) los tokens
+ * @param issuer
+ *   valor del claim `iss`, exigido también al verificar
+ * @param audience
+ *   valor del claim `aud`, exigido también al verificar
+ * @param ttl
+ *   vida de cada token desde su emisión
+ */
+final case class JwtConfig(keys: SigningKeys, issuer: String, audience: String, ttl: FiniteDuration)
+
+/**
+ * Seguridad de la API: cómo se firman los tokens y qué clientes pueden obtenerlos.
+ *
+ * @param clients
+ *   clientes registrados, con su secreto ya derivado y sus alcances concedidos
+ */
+final case class SecurityConfig(jwt: JwtConfig, clients: NonEmptyList[RegisteredClient])
+
 final case class AppConfig(
     http: HttpConfig,
     database: DatabaseConfig,
     bcrp: BcrpConfig,
     exchangeRateApi: ExchangeRateApiConfig,
     rateSources: RateSourcesConfig,
-    rateCache: RateCacheConfig
+    rateCache: RateCacheConfig,
+    security: SecurityConfig
 )

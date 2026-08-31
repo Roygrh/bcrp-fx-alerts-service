@@ -15,6 +15,7 @@ import pe.quiroz.fxalerts.application.rate.{
   RateSnapshot,
   StubExchangeRateSource
 }
+import pe.quiroz.fxalerts.application.security.Scope
 import pe.quiroz.fxalerts.domain.DomainError.{
   ExchangeRateError,
   ExchangeRateNotPublished,
@@ -23,6 +24,8 @@ import pe.quiroz.fxalerts.domain.DomainError.{
 import pe.quiroz.fxalerts.domain.alert.BcrpSeries
 import pe.quiroz.fxalerts.domain.rate.RateProvider
 import pe.quiroz.fxalerts.infrastructure.http.HttpApi
+import pe.quiroz.fxalerts.infrastructure.http.auth.TestTokens
+import pe.quiroz.fxalerts.infrastructure.http.auth.TestTokens.*
 
 import java.time.Instant
 
@@ -33,13 +36,18 @@ class RateRoutesSuite extends CatsEffectSuite:
 
   private val currentUri = uri"/api/v1/rates/current"
 
+  private val reader = "monitor-001"
+
   private def withApp[A](
       behaviour: IO[Either[ExchangeRateError, RateSnapshot]]
   )(body: HttpApp[IO] => IO[A]): IO[A] =
     StubExchangeRateSource(behaviour).flatMap { source =>
-      val routes = RateRoutes[IO](ExchangeRateService[IO](source))
+      val routes = RateRoutes[IO](ExchangeRateService[IO](source), TestTokens.auth)
       body(HttpApi.fromEndpoints[IO](routes.serverEndpoints))
     }
+
+  private def current(scopes: Scope*): Request[IO] =
+    Request[IO](Method.GET, currentUri).authenticatedAs(reader, scopes*)
 
   private def bodyJson(response: Response[IO]): IO[Json] =
     response.bodyText.compile.string.map(raw => parse(raw).fold(throw _, identity))
@@ -62,7 +70,7 @@ class RateRoutesSuite extends CatsEffectSuite:
     val retrievedAt = Instant.now().minusSeconds(90)
     withApp(StubExchangeRateSource.fixed(StubExchangeRateSource.snapshotAt(retrievedAt))) { app =>
       for
-        response <- app.run(Request[IO](Method.GET, currentUri))
+        response <- app.run(current(Scope.RatesRead))
         json     <- bodyJson(response)
       yield
         assertEquals(response.status, Status.Ok)
@@ -86,7 +94,7 @@ class RateRoutesSuite extends CatsEffectSuite:
     )
     withApp(StubExchangeRateSource.fixed(snapshot)) { app =>
       for
-        response <- app.run(Request[IO](Method.GET, currentUri))
+        response <- app.run(current(Scope.RatesRead))
         json     <- bodyJson(response)
       yield
         assertEquals(response.status, Status.Ok)
@@ -106,7 +114,7 @@ class RateRoutesSuite extends CatsEffectSuite:
     val snapshot = StubExchangeRateSource.snapshotAt(Instant.now(), Freshness.Stale)
     withApp(StubExchangeRateSource.fixed(snapshot)) { app =>
       for
-        response <- app.run(Request[IO](Method.GET, currentUri))
+        response <- app.run(current(Scope.RatesRead))
         json     <- bodyJson(response)
       yield
         assertEquals(response.status, Status.Ok)
@@ -117,7 +125,7 @@ class RateRoutesSuite extends CatsEffectSuite:
     withApp(StubExchangeRateSource.failing(ExchangeRateNotPublished(BcrpSeries.UsdPenSbsSell))) {
       app =>
         for
-          response <- app.run(Request[IO](Method.GET, currentUri))
+          response <- app.run(current(Scope.RatesRead))
           json     <- bodyJson(response)
         yield
           assertProblem(response, Status.NotFound)
@@ -130,7 +138,7 @@ class RateRoutesSuite extends CatsEffectSuite:
     withApp(StubExchangeRateSource.failing(ExchangeRateUnavailable(BcrpSeries.UsdPenSbsSell))) {
       app =>
         for
-          response <- app.run(Request[IO](Method.GET, currentUri))
+          response <- app.run(current(Scope.RatesRead))
           json     <- bodyJson(response)
         yield
           assertProblem(response, Status.ServiceUnavailable)
@@ -140,7 +148,41 @@ class RateRoutesSuite extends CatsEffectSuite:
           assert(stringAt(json, "detail").exists(_.nonEmpty))
     }
 
-  test("el documento OpenAPI incluye el endpoint de tipo de cambio y la procedencia"):
+  // --- Autenticación y autorización ------------------------------------------------------------
+
+  test("sin token responde 401 y con un token inválido también, sin consultar la fuente"):
+    withApp(IO.raiseError(new AssertionError("La fuente no debe consultarse"))) { app =>
+      for
+        missing <- app.run(Request[IO](Method.GET, currentUri))
+        invalid <- app.run(
+          Request[IO](Method.GET, currentUri).withBearer(TestTokens.foreign(reader))
+        )
+      yield
+        assertProblem(missing, Status.Unauthorized)
+        assertProblem(invalid, Status.Unauthorized)
+        assertEquals(
+          missing.headers.get(ci"WWW-Authenticate").map(_.head.value),
+          Some("Bearer realm=\"bcrp-fx-alerts\"")
+        )
+    }
+
+  test("un token sin rates:read responde 403 insufficient_scope"):
+    withApp(StubExchangeRateSource.freshSample) { app =>
+      for
+        response <- app.run(current(Scope.AlertsRead, Scope.AlertsWrite))
+        json     <- bodyJson(response)
+      yield
+        assertProblem(response, Status.Forbidden)
+        assertEquals(
+          response.headers.get(ci"WWW-Authenticate").map(_.head.value),
+          Some(
+            "Bearer realm=\"bcrp-fx-alerts\", error=\"insufficient_scope\", scope=\"rates:read\""
+          )
+        )
+        assertEquals(stringAt(json, "type"), Some("urn:fx-alerts:problem:forbidden"))
+    }
+
+  test("el documento OpenAPI incluye el endpoint de tipo de cambio, la procedencia y su alcance"):
     withApp(StubExchangeRateSource.freshSample) { app =>
       for
         response <- app.run(Request[IO](Method.GET, uri"/docs/docs.yaml"))
@@ -151,4 +193,5 @@ class RateRoutesSuite extends CatsEffectSuite:
         assert(document.contains("STALE"))
         assert(document.contains("official"))
         assert(document.contains("Rates By Exchange Rate API"))
+        assert(document.contains("- rates:read"))
     }

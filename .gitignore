@@ -9,6 +9,7 @@ metals.sbt
 .scala-build/
 *.class
 *.log
+*.pem
 
 # IDEs
 .idea/

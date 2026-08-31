@@ -75,7 +75,8 @@ object Alert:
    * @param id
    *   identificador ya generado por la capa de aplicación
    * @param clientId
-   *   identificador del cliente tal como lo envía el consumidor (sin validar)
+   *   cliente propietario, ya validado: es la identidad autenticada de quien registra la alerta, no
+   *   un dato que el consumidor pueda elegir
    * @param threshold
    *   umbral sin validar
    * @param createdAt
@@ -83,22 +84,21 @@ object Alert:
    */
   def create(
       id: AlertId,
-      clientId: String,
+      clientId: ClientId,
       series: BcrpSeries,
       threshold: BigDecimal,
       direction: CrossingDirection,
       createdAt: Instant
   ): Either[DomainError, Alert] =
-    for
-      validClientId  <- ClientId.from(clientId)
-      validThreshold <- Threshold.from(threshold)
-    yield Alert(
-      id = id,
-      clientId = validClientId,
-      series = series,
-      threshold = validThreshold,
-      direction = direction,
-      status = AlertStatus.Active,
-      createdAt = createdAt,
-      updatedAt = createdAt
-    )
+    Threshold.from(threshold).map { validThreshold =>
+      Alert(
+        id = id,
+        clientId = clientId,
+        series = series,
+        threshold = validThreshold,
+        direction = direction,
+        status = AlertStatus.Active,
+        createdAt = createdAt,
+        updatedAt = createdAt
+      )
+    }

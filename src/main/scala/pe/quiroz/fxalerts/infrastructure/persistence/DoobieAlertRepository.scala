@@ -15,6 +15,10 @@ import pe.quiroz.fxalerts.infrastructure.persistence.AlertMeta.given
  *
  * Cada operación se ejecuta en su propia transacción. Las escrituras dirigidas a una alerta
  * concreta consultan el número de filas afectadas para traducir la ausencia a `AlertNotFound`.
+ *
+ * El acotamiento por cliente propietario forma parte del `WHERE` de cada consulta (`client_id`), no
+ * de un filtrado posterior en memoria: la base de datos nunca devuelve filas ajenas al cliente y no
+ * existe ventana entre comprobar la propiedad y actuar sobre la fila.
  */
 final class DoobieAlertRepository[F[_]: MonadCancelThrow](transactor: Transactor[F])
     extends AlertRepository[F]:
@@ -30,13 +34,14 @@ final class DoobieAlertRepository[F[_]: MonadCancelThrow](transactor: Transactor
       )
     """.update.run.transact(transactor).void
 
-  def findById(id: AlertId): F[Option[Alert]] =
-    (selectAlert ++ fr"WHERE id = $id").query[Alert].option.transact(transactor)
+  def findById(owner: ClientId, id: AlertId): F[Option[Alert]] =
+    (selectAlert ++ fr"WHERE id = $id AND client_id = $owner")
+      .query[Alert]
+      .option
+      .transact(transactor)
 
-  def findAll(clientId: Option[ClientId]): F[List[Alert]] =
-    (selectAlert ++
-      Fragments.whereAndOpt(clientId.map(c => fr"client_id = $c")) ++
-      fr"ORDER BY created_at, id")
+  def findAll(owner: ClientId): F[List[Alert]] =
+    (selectAlert ++ fr"WHERE client_id = $owner ORDER BY created_at, id")
       .query[Alert]
       .to[List]
       .transact(transactor)
@@ -49,13 +54,13 @@ final class DoobieAlertRepository[F[_]: MonadCancelThrow](transactor: Transactor
           direction   = ${alert.direction},
           status      = ${alert.status},
           updated_at  = ${alert.updatedAt}
-      WHERE id = ${alert.id}
+      WHERE id = ${alert.id} AND client_id = ${alert.clientId}
     """.update.run
       .map(affected => Either.cond(affected == 1, (), AlertNotFound(alert.id)))
       .transact(transactor)
 
-  def delete(id: AlertId): F[Either[AlertNotFound, Unit]] =
-    sql"DELETE FROM alerts WHERE id = $id".update.run
+  def delete(owner: ClientId, id: AlertId): F[Either[AlertNotFound, Unit]] =
+    sql"DELETE FROM alerts WHERE id = $id AND client_id = $owner".update.run
       .map(affected => Either.cond(affected == 1, (), AlertNotFound(id)))
       .transact(transactor)
 

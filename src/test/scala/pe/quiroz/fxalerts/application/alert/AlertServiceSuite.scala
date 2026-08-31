@@ -9,8 +9,10 @@ import java.util.UUID
 
 class AlertServiceSuite extends CatsEffectSuite:
 
+  private val owner = ClientId.from("cliente-001").toOption.get
+  private val other = ClientId.from("cliente-002").toOption.get
+
   private val createCommand = CreateAlert(
-    clientId = "cliente-001",
     series = BcrpSeries.UsdPenSbsSell,
     threshold = BigDecimal("3.80"),
     direction = CrossingDirection.Above
@@ -35,13 +37,13 @@ class AlertServiceSuite extends CatsEffectSuite:
 
   // --- create ----------------------------------------------------------------------------------
 
-  test("create persiste una alerta activa y la devuelve"):
+  test("create persiste una alerta activa a nombre del propietario y la devuelve"):
     withService { (service, repository) =>
       for
-        alert  <- service.create(createCommand).flatMap(rightOrFail)
-        stored <- repository.findById(alert.id)
+        alert  <- service.create(owner, createCommand).flatMap(rightOrFail)
+        stored <- repository.findById(owner, alert.id)
       yield
-        assertEquals(alert.clientId.value, "cliente-001")
+        assertEquals(alert.clientId, owner)
         assertEquals(alert.threshold.value, BigDecimal("3.8"))
         assertEquals(alert.status, AlertStatus.Active)
         assertEquals(alert.updatedAt, alert.createdAt)
@@ -51,16 +53,16 @@ class AlertServiceSuite extends CatsEffectSuite:
   test("create asigna identificadores distintos a cada alerta"):
     withService { (service, _) =>
       for
-        first  <- service.create(createCommand).flatMap(rightOrFail)
-        second <- service.create(createCommand).flatMap(rightOrFail)
+        first  <- service.create(owner, createCommand).flatMap(rightOrFail)
+        second <- service.create(owner, createCommand).flatMap(rightOrFail)
       yield assertNotEquals(first.id, second.id)
     }
 
   test("create devuelve el error de dominio y no persiste nada si el umbral es inválido"):
     withService { (service, repository) =>
       for
-        result <- service.create(createCommand.copy(threshold = BigDecimal(0)))
-        all    <- repository.findAll(None)
+        result <- service.create(owner, createCommand.copy(threshold = BigDecimal(0)))
+        all    <- repository.all
       yield
         assertEquals(
           result,
@@ -69,42 +71,33 @@ class AlertServiceSuite extends CatsEffectSuite:
         assertEquals(all, Nil)
     }
 
-  test("create devuelve el error de dominio si el cliente es inválido"):
-    withService { (service, _) =>
-      service.create(createCommand.copy(clientId = "  ")).map { result =>
-        assertEquals(result, Left(DomainError.InvalidClientId("  ", ClientIdViolation.Blank)))
-      }
-    }
-
   // --- get / list ------------------------------------------------------------------------------
 
-  test("get devuelve la alerta existente"):
+  test("get devuelve la alerta existente de su propietario"):
     withService { (service, _) =>
       for
-        created <- service.create(createCommand).flatMap(rightOrFail)
-        found   <- service.get(created.id)
+        created <- service.create(owner, createCommand).flatMap(rightOrFail)
+        found   <- service.get(owner, created.id)
       yield assertEquals(found, Right(created))
     }
 
   test("get devuelve AlertNotFound para un identificador desconocido"):
     withService { (service, _) =>
       service
-        .get(unknownId)
+        .get(owner, unknownId)
         .map(result => assertEquals(result, Left(DomainError.AlertNotFound(unknownId))))
     }
 
-  test("list devuelve todas las alertas o solo las del cliente indicado"):
+  test("list devuelve solo las alertas del propietario, en orden de creación"):
     withService { (service, _) =>
       for
-        first  <- service.create(createCommand).flatMap(rightOrFail)
-        second <- service.create(createCommand.copy(clientId = "cliente-002")).flatMap(rightOrFail)
-        clientId <- rightOrFail(ClientId.from("cliente-002"))
-        all      <- service.list(None)
-        filtered <- service.list(Some(clientId))
-        none     <- service.list(ClientId.from("cliente-999").toOption)
+        first  <- service.create(owner, createCommand).flatMap(rightOrFail)
+        _      <- service.create(other, createCommand).flatMap(rightOrFail)
+        second <- service.create(owner, createCommand).flatMap(rightOrFail)
+        mine   <- service.list(owner)
+        none   <- service.list(ClientId.from("cliente-999").toOption.get)
       yield
-        assertEquals(all.map(_.id).toSet, Set(first.id, second.id))
-        assertEquals(filtered, List(second))
+        assertEquals(mine.map(_.id), List(first.id, second.id))
         assertEquals(none, Nil)
     }
 
@@ -113,9 +106,9 @@ class AlertServiceSuite extends CatsEffectSuite:
   test("update reemplaza la configuración y persiste el resultado"):
     withService { (service, repository) =>
       for
-        created <- service.create(createCommand).flatMap(rightOrFail)
-        updated <- service.update(created.id, updateCommand).flatMap(rightOrFail)
-        stored  <- repository.findById(created.id)
+        created <- service.create(owner, createCommand).flatMap(rightOrFail)
+        updated <- service.update(owner, created.id, updateCommand).flatMap(rightOrFail)
+        stored  <- repository.findById(owner, created.id)
       yield
         assertEquals(updated.id, created.id)
         assertEquals(updated.clientId, created.clientId)
@@ -130,16 +123,20 @@ class AlertServiceSuite extends CatsEffectSuite:
   test("update devuelve AlertNotFound para un identificador desconocido"):
     withService { (service, _) =>
       service
-        .update(unknownId, updateCommand)
+        .update(owner, unknownId, updateCommand)
         .map(result => assertEquals(result, Left(DomainError.AlertNotFound(unknownId))))
     }
 
   test("update devuelve el error de dominio y no modifica la alerta si el umbral es inválido"):
     withService { (service, repository) =>
       for
-        created <- service.create(createCommand).flatMap(rightOrFail)
-        result  <- service.update(created.id, updateCommand.copy(threshold = BigDecimal("1.23456")))
-        stored  <- repository.findById(created.id)
+        created <- service.create(owner, createCommand).flatMap(rightOrFail)
+        result  <- service.update(
+          owner,
+          created.id,
+          updateCommand.copy(threshold = BigDecimal("1.23456"))
+        )
+        stored <- repository.findById(owner, created.id)
       yield
         assertEquals(
           result,
@@ -155,9 +152,9 @@ class AlertServiceSuite extends CatsEffectSuite:
   test("delete elimina la alerta existente"):
     withService { (service, repository) =>
       for
-        created <- service.create(createCommand).flatMap(rightOrFail)
-        result  <- service.delete(created.id)
-        stored  <- repository.findById(created.id)
+        created <- service.create(owner, createCommand).flatMap(rightOrFail)
+        result  <- service.delete(owner, created.id)
+        stored  <- repository.findById(owner, created.id)
       yield
         assertEquals(result, Right(()))
         assertEquals(stored, None)
@@ -166,6 +163,23 @@ class AlertServiceSuite extends CatsEffectSuite:
   test("delete devuelve AlertNotFound para un identificador desconocido"):
     withService { (service, _) =>
       service
-        .delete(unknownId)
+        .delete(owner, unknownId)
         .map(result => assertEquals(result, Left(DomainError.AlertNotFound(unknownId))))
+    }
+
+  // --- Aislamiento por cliente -----------------------------------------------------------------
+
+  test("otro cliente no puede leer, modificar ni eliminar una alerta ajena: AlertNotFound"):
+    withService { (service, repository) =>
+      for
+        created <- service.create(owner, createCommand).flatMap(rightOrFail)
+        get     <- service.get(other, created.id)
+        update  <- service.update(other, created.id, updateCommand)
+        delete  <- service.delete(other, created.id)
+        stored  <- repository.findById(owner, created.id)
+      yield
+        assertEquals(get, Left(DomainError.AlertNotFound(created.id)))
+        assertEquals(update, Left(DomainError.AlertNotFound(created.id)))
+        assertEquals(delete, Left(DomainError.AlertNotFound(created.id)))
+        assertEquals(stored, Some(created))
     }

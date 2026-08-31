@@ -25,7 +25,10 @@ lazy val root = (project in file("."))
     description := "Servicio de alertas de tipo de cambio basado en la API de estadísticas del BCRP",
     libraryDependencies ++= Dependencies.all,
     Compile / run / fork         := true,
-    Compile / run / connectInput := true
+    Compile / run / connectInput := true,
+    // Hay un segundo `main` (ClientSecretTool, utilidad de alta de clientes); `sbt run` arranca
+    // siempre el servicio y la utilidad se invoca con `runMain`.
+    Compile / run / mainClass := Some("pe.quiroz.fxalerts.Main")
   )
 
 // Pruebas de integración contra PostgreSQL real (Testcontainers). Viven en un subproyecto

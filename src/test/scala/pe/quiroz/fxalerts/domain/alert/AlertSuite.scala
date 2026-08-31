@@ -10,9 +10,10 @@ class AlertSuite extends FunSuite:
 
   private val id        = AlertId(UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e"))
   private val createdAt = Instant.parse("2026-08-28T15:00:00Z")
+  private val clientId  = ClientId.from("cliente-001").toOption.get
 
   private def create(
-      clientId: String = "cliente-001",
+      clientId: ClientId = clientId,
       threshold: BigDecimal = BigDecimal("3.80"),
       direction: CrossingDirection = CrossingDirection.Above
   ): Either[DomainError, Alert] =
@@ -56,13 +57,6 @@ class AlertSuite extends FunSuite:
       ThresholdViolation.maxValue
     )
 
-  test("recorta espacios en los extremos del identificador de cliente"):
-    assertEquals(valid(create(clientId = "  cliente-001  ")).clientId.value, "cliente-001")
-
-  test("acepta un identificador de cliente con la longitud máxima"):
-    val clientId = "c" * ClientIdViolation.maxLength
-    assertEquals(valid(create(clientId = clientId)).clientId.value, clientId)
-
   // --- Umbral inválido -------------------------------------------------------------------------
 
   test("rechaza un umbral igual a cero"):
@@ -89,31 +83,30 @@ class AlertSuite extends FunSuite:
       Left(DomainError.InvalidThreshold(BigDecimal("1000000"), ThresholdViolation.TooLarge))
     )
 
-  // --- Cliente inválido ------------------------------------------------------------------------
+  // --- Identificador de cliente ----------------------------------------------------------------
+  //
+  // Una alerta solo puede construirse con un ClientId ya válido; las reglas del identificador se
+  // prueban sobre su constructor inteligente.
 
-  test("rechaza un identificador de cliente vacío"):
-    assertEquals(
-      create(clientId = ""),
-      Left(DomainError.InvalidClientId("", ClientIdViolation.Blank))
-    )
+  test("ClientId recorta espacios en los extremos"):
+    assertEquals(ClientId.from("  cliente-001  ").map(_.value), Right("cliente-001"))
 
-  test("rechaza un identificador de cliente compuesto solo por espacios"):
+  test("ClientId acepta la longitud máxima"):
+    val raw = "c" * ClientIdViolation.maxLength
+    assertEquals(ClientId.from(raw).map(_.value), Right(raw))
+
+  test("ClientId rechaza un identificador vacío o compuesto solo por espacios"):
+    assertEquals(ClientId.from(""), Left(DomainError.InvalidClientId("", ClientIdViolation.Blank)))
     assertEquals(
-      create(clientId = "   \t "),
+      ClientId.from("   \t "),
       Left(DomainError.InvalidClientId("   \t ", ClientIdViolation.Blank))
     )
 
-  test("rechaza un identificador de cliente demasiado largo"):
-    val clientId = "c" * (ClientIdViolation.maxLength + 1)
+  test("ClientId rechaza un identificador demasiado largo"):
+    val raw = "c" * (ClientIdViolation.maxLength + 1)
     assertEquals(
-      create(clientId = clientId),
-      Left(DomainError.InvalidClientId(clientId, ClientIdViolation.TooLong))
-    )
-
-  test("ante varios errores devuelve el primero en orden de declaración"):
-    assertEquals(
-      create(clientId = "", threshold = BigDecimal(-1)),
-      Left(DomainError.InvalidClientId("", ClientIdViolation.Blank))
+      ClientId.from(raw),
+      Left(DomainError.InvalidClientId(raw, ClientIdViolation.TooLong))
     )
 
   // --- Actualización ---------------------------------------------------------------------------

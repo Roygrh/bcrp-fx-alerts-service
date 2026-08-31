@@ -11,12 +11,14 @@ import AlertJson.given
  * Cuerpo de `POST /api/v1/alerts`.
  *
  * Modelo propio de la frontera HTTP: transporta los datos tal como los envía el consumidor
- * (`clientId` y `threshold` sin validar) y se traduce al comando de aplicación, de modo que el
- * contrato público y el dominio pueden evolucionar por separado. Las invariantes de negocio las
- * valida el dominio; aquí solo se exige que el JSON tenga la forma esperada.
+ * (`threshold` sin validar) y se traduce al comando de aplicación, de modo que el contrato público
+ * y el dominio pueden evolucionar por separado. Las invariantes de negocio las valida el dominio;
+ * aquí solo se exige que el JSON tenga la forma esperada.
  *
- * @param clientId
- *   identificador del cliente comercial propietario
+ * El cliente propietario no forma parte del cuerpo: es el sujeto del token con que se autentica la
+ * petición. Un campo que el servidor tuviera que ignorar o contrastar con el token sería una fuente
+ * de confusión y de errores de asignación masiva; un `clientId` recibido se ignora.
+ *
  * @param series
  *   código de la serie del BCRP a observar
  * @param threshold
@@ -25,7 +27,6 @@ import AlertJson.given
  *   sentido del cruce que dispara la alerta
  */
 final case class CreateAlertRequest(
-    clientId: String,
     series: BcrpSeries,
     threshold: BigDecimal,
     direction: CrossingDirection
@@ -33,12 +34,11 @@ final case class CreateAlertRequest(
       Schema:
 
   def toCommand: CreateAlert =
-    CreateAlert(clientId = clientId, series = series, threshold = threshold, direction = direction)
+    CreateAlert(series = series, threshold = threshold, direction = direction)
 
 object CreateAlertRequest:
 
   val example: CreateAlertRequest = CreateAlertRequest(
-    clientId = "cliente-001",
     series = BcrpSeries.UsdPenSbsSell,
     threshold = BigDecimal("3.85"),
     direction = CrossingDirection.Above

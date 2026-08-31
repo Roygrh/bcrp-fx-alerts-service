@@ -1,9 +1,11 @@
 package pe.quiroz.fxalerts.infrastructure.http
 
 import cats.effect.Async
-import org.http4s.HttpApp
+import cats.syntax.all.*
+import org.http4s.{HttpApp, Request}
 import org.typelevel.log4cats.Logger
 import pe.quiroz.fxalerts.infrastructure.http.alert.AlertRoutes
+import pe.quiroz.fxalerts.infrastructure.http.auth.{BearerAuthentication, TokenRoutes}
 import pe.quiroz.fxalerts.infrastructure.http.health.HealthRoutes
 import pe.quiroz.fxalerts.infrastructure.http.middleware.RequestLogging
 import pe.quiroz.fxalerts.infrastructure.http.problem.ProblemHandlers
@@ -19,6 +21,10 @@ import sttp.tapir.swagger.bundle.SwaggerInterpreter
  * partir de las mismas definiciones Tapir que atienden las peticiones. Toda la aplicación queda
  * envuelta por el middleware de observabilidad ([[RequestLogging]]) y los errores ajenos a la
  * lógica de negocio se responden como Problem Details a través de [[ProblemHandlers]].
+ *
+ * La seguridad no es un middleware sino parte de cada endpoint (ver
+ * [[pe.quiroz.fxalerts.infrastructure.http.auth.ApiSecurity]]): `/health`, `/docs` y `/oauth/token`
+ * no declaran entrada de seguridad y quedan abiertos; el resto la exige.
  */
 object HttpApi:
 
@@ -27,25 +33,39 @@ object HttpApi:
 
   def httpApp[F[_]: Async: Logger](
       healthRoutes: HealthRoutes[F],
+      tokenRoutes: TokenRoutes[F],
       alertRoutes: AlertRoutes[F],
-      rateRoutes: RateRoutes[F]
+      rateRoutes: RateRoutes[F],
+      auth: BearerAuthentication[F]
   ): HttpApp[F] =
     fromEndpoints(
-      healthRoutes.serverEndpoints ++ alertRoutes.serverEndpoints ++ rateRoutes.serverEndpoints
+      healthRoutes.serverEndpoints ++ tokenRoutes.serverEndpoints ++
+        alertRoutes.serverEndpoints ++ rateRoutes.serverEndpoints,
+      auth.subjectOf
     )
 
   /**
-   * Construye la aplicación a partir de un conjunto arbitrario de endpoints. Las suites de pruebas
-   * lo usan para montar un grupo de rutas aislado con la misma configuración que producción
-   * (manejadores de error y middleware incluidos).
+   * Construye la aplicación a partir de un conjunto arbitrario de endpoints, sin identidad en el
+   * log de peticiones. Las suites de pruebas lo usan para montar un grupo de rutas aislado con la
+   * misma configuración que producción (manejadores de error y middleware incluidos).
    */
   def fromEndpoints[F[_]: Async: Logger](apiEndpoints: List[ServerEndpoint[Any, F]]): HttpApp[F] =
+    fromEndpoints(apiEndpoints, _ => none[String].pure[F])
+
+  /**
+   * @param subjectOf
+   *   identidad autenticada de cada petición, solo para el log (ver [[RequestLogging]])
+   */
+  def fromEndpoints[F[_]: Async: Logger](
+      apiEndpoints: List[ServerEndpoint[Any, F]],
+      subjectOf: Request[F] => F[Option[String]]
+  ): HttpApp[F] =
     val docsEndpoints: List[ServerEndpoint[Any, F]] =
       SwaggerInterpreter().fromServerEndpoints[F](apiEndpoints, apiTitle, apiVersion)
 
     val routes =
       Http4sServerInterpreter[F](serverOptions[F]).toRoutes(apiEndpoints ++ docsEndpoints)
-    RequestLogging(routes.orNotFound)
+    RequestLogging(routes.orNotFound, subjectOf)
 
   /**
    * Opciones del intérprete: decodificación fallida, excepciones y rutas sin coincidencia responden

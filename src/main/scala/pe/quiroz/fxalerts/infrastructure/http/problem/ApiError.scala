@@ -1,7 +1,7 @@
 package pe.quiroz.fxalerts.infrastructure.http.problem
 
 import pe.quiroz.fxalerts.domain.DomainError
-import sttp.model.StatusCode
+import sttp.model.{HeaderNames, StatusCode}
 import sttp.tapir.*
 
 /**
@@ -12,16 +12,21 @@ import sttp.tapir.*
  * variante `oneOf` por cada caso (la documentación OpenAPI y el serializador no pueden divergir) y
  * [[ApiError.fromDomain]] es la única traducción desde [[DomainError]], de modo que un error de
  * dominio nuevo produce un aviso de exhaustividad en un solo lugar.
+ *
+ * Las variantes de autenticación y autorización llevan además el valor de la cabecera
+ * `WWW-Authenticate` (RFC 6750 §3), que es obligatoria en el 401 e informativa en el 403.
  */
 sealed trait ApiError extends Product with Serializable:
   def problem: ProblemDetails
 
 object ApiError:
 
-  final case class BadRequest(problem: ProblemDetails)         extends ApiError
-  final case class NotFound(problem: ProblemDetails)           extends ApiError
-  final case class ServiceUnavailable(problem: ProblemDetails) extends ApiError
-  final case class Internal(problem: ProblemDetails)           extends ApiError
+  final case class BadRequest(problem: ProblemDetails)                      extends ApiError
+  final case class Unauthorized(problem: ProblemDetails, challenge: String) extends ApiError
+  final case class Forbidden(problem: ProblemDetails, challenge: String)    extends ApiError
+  final case class NotFound(problem: ProblemDetails)                        extends ApiError
+  final case class ServiceUnavailable(problem: ProblemDetails)              extends ApiError
+  final case class Internal(problem: ProblemDetails)                        extends ApiError
 
   /**
    * Punto único de traducción de errores de dominio a errores HTTP.
@@ -46,6 +51,10 @@ object ApiError:
       case DomainError.ExchangeRateUnavailable(_) =>
         ServiceUnavailable(ProblemDetails.sourceUnavailable(error.message))
 
+  private val challengeHeader: EndpointIO.Header[String] =
+    header[String](HeaderNames.WwwAuthenticate)
+      .description("Reto de autenticación según RFC 6750 (esquema `Bearer`)")
+
   /**
    * Salida de error compartida por todos los endpoints de la API.
    *
@@ -60,6 +69,34 @@ object ApiError:
           .description("La petición es inválida; `errors` detalla el problema de cada campo")
           .example(ProblemDetails.exampleValidation)
           .map(BadRequest.apply)(_.problem)
+      ),
+      oneOfVariant(
+        StatusCode.Unauthorized,
+        challengeHeader
+          .example("Bearer realm=\"bcrp-fx-alerts\"")
+          .and(
+            ProblemDetails.body
+              .description("Falta el token de acceso o no es válido")
+              .example(ProblemDetails.unauthorized)
+          )
+          .map((challenge, problem) => Unauthorized(problem, challenge))(error =>
+            (error.challenge, error.problem)
+          )
+      ),
+      oneOfVariant(
+        StatusCode.Forbidden,
+        challengeHeader
+          .example(
+            "Bearer realm=\"bcrp-fx-alerts\", error=\"insufficient_scope\", scope=\"alerts:write\""
+          )
+          .and(
+            ProblemDetails.body
+              .description("El token es válido pero no incluye el alcance que exige la operación")
+              .example(ProblemDetails.forbidden("alerts:write"))
+          )
+          .map((challenge, problem) => Forbidden(problem, challenge))(error =>
+            (error.challenge, error.problem)
+          )
       ),
       oneOfVariant(
         StatusCode.NotFound,

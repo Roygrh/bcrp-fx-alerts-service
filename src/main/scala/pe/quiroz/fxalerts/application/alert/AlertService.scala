@@ -17,16 +17,21 @@ import pe.quiroz.fxalerts.domain.alert.{Alert, AlertId, ClientId}
  * inteligentes y traduce la ausencia en el repositorio al error de dominio correspondiente. Ningún
  * método lanza excepciones por causas de negocio: todo resultado esperable se expresa en
  * `Either[DomainError, _]`.
+ *
+ * Toda operación recibe el cliente en cuyo nombre se ejecuta (`owner`): la identidad autenticada
+ * por la capa de entrada. El servicio solo opera sobre las alertas de ese cliente; una alerta de
+ * otro cliente se reporta como inexistente ([[AlertNotFound]]), no como prohibida, para que ningún
+ * cliente pueda averiguar qué identificadores existen fuera de su ámbito.
  */
 final class AlertService[F[_]: Monad: Clock: UUIDGen](repository: AlertRepository[F]):
 
-  def create(command: CreateAlert): F[Either[DomainError, Alert]] =
+  def create(owner: ClientId, command: CreateAlert): F[Either[DomainError, Alert]] =
     for
       id  <- UUIDGen[F].randomUUID.map(AlertId(_))
       now <- Clock[F].realTimeInstant
       created = Alert.create(
         id = id,
-        clientId = command.clientId,
+        clientId = owner,
         series = command.series,
         threshold = command.threshold,
         direction = command.direction,
@@ -35,21 +40,21 @@ final class AlertService[F[_]: Monad: Clock: UUIDGen](repository: AlertRepositor
       result <- created.traverse(alert => repository.create(alert).as(alert))
     yield result
 
-  def get(id: AlertId): F[Either[DomainError, Alert]] =
-    repository.findById(id).map(_.toRight(AlertNotFound(id)))
+  def get(owner: ClientId, id: AlertId): F[Either[DomainError, Alert]] =
+    repository.findById(owner, id).map(_.toRight(AlertNotFound(id)))
 
-  def list(clientId: Option[ClientId]): F[List[Alert]] =
-    repository.findAll(clientId)
+  def list(owner: ClientId): F[List[Alert]] =
+    repository.findAll(owner)
 
   /**
-   * Reemplaza la configuración de una alerta existente.
+   * Reemplaza la configuración de una alerta existente del cliente.
    *
    * Si la alerta desaparece entre la lectura y la escritura, el repositorio lo reporta y el
    * resultado es igualmente `AlertNotFound`, sin excepciones.
    */
-  def update(id: AlertId, command: UpdateAlert): F[Either[DomainError, Alert]] =
+  def update(owner: ClientId, id: AlertId, command: UpdateAlert): F[Either[DomainError, Alert]] =
     val updated = for
-      existing <- EitherT(get(id))
+      existing <- EitherT(get(owner, id))
       now      <- EitherT.liftF(Clock[F].realTimeInstant)
       alert    <- EitherT.fromEither[F](
         existing.update(
@@ -64,5 +69,5 @@ final class AlertService[F[_]: Monad: Clock: UUIDGen](repository: AlertRepositor
     yield alert
     updated.value
 
-  def delete(id: AlertId): F[Either[DomainError, Unit]] =
-    repository.delete(id).map(_.leftWiden[DomainError])
+  def delete(owner: ClientId, id: AlertId): F[Either[DomainError, Unit]] =
+    repository.delete(owner, id).map(_.leftWiden[DomainError])

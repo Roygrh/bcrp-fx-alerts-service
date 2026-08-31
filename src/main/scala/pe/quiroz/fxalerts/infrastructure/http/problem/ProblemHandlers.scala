@@ -2,7 +2,8 @@ package pe.quiroz.fxalerts.infrastructure.http.problem
 
 import org.typelevel.log4cats.Logger
 import pe.quiroz.fxalerts.infrastructure.http.middleware.RequestLogging
-import sttp.model.{Header, StatusCode}
+import sttp.model.headers.WWWAuthenticateChallenge
+import sttp.model.{Header, HeaderNames, StatusCode}
 import sttp.monad.MonadError
 import sttp.tapir.*
 import sttp.tapir.DecodeResult.Error.JsonDecodeException
@@ -39,16 +40,54 @@ object ProblemHandlers:
    * Conserva la decisión por defecto de Tapir sobre qué fallos se responden y con qué código (un
    * `path[UUID]` inválido es 400; una ruta que no coincide se cede al siguiente endpoint) y
    * reemplaza únicamente el cuerpo de la respuesta.
+   *
+   * Excepción: una cabecera `Authorization` que no puede interpretarse (otro esquema que `Bearer`)
+   * en un endpoint con entrada de seguridad no es una petición mal formada sino una petición sin
+   * credenciales válidas, y se responde 401 con el reto `WWW-Authenticate` de ese esquema, igual
+   * que un token ausente.
    */
   def decodeFailureHandler[F[_]]: DecodeFailureHandler[F] =
     DecodeFailureHandler.pure[F] { ctx =>
-      DefaultDecodeFailureHandler.respond(ctx).map { case (status, extraHeaders) =>
-        val problem =
-          if status == StatusCode.BadRequest then ProblemDetails.malformedRequest(fieldErrors(ctx))
-          else ProblemDetails.forStatus(status)
-        respond(status, extraHeaders, problem)
-      }
+      authChallenge(ctx) match
+        case Some(challenge) =>
+          Some(
+            respond(
+              StatusCode.Unauthorized,
+              List(Header(HeaderNames.WwwAuthenticate, challenge.toString)),
+              ProblemDetails.unauthorized
+            )
+          )
+        case None =>
+          DefaultDecodeFailureHandler.respond(ctx).map { case (status, extraHeaders) =>
+            val problem =
+              if status == StatusCode.BadRequest then
+                ProblemDetails.malformedRequest(fieldErrors(ctx))
+              else ProblemDetails.forStatus(status)
+            respond(status, extraHeaders, problem)
+          }
     }
+
+  /**
+   * Reto del esquema de seguridad del endpoint cuando el fallo proviene de la cabecera
+   * `Authorization` de su entrada de seguridad. Tapir descompone la entrada de seguridad en sus
+   * cabeceras básicas, por lo que el fallo se atribuye a la cabecera y no al nodo `Auth`.
+   */
+  private def authChallenge(ctx: DecodeFailureContext): Option[WWWAuthenticateChallenge] =
+    ctx.failingInput match
+      case auth: EndpointInput.Auth[?, ?] => Some(auth.challenge)
+      case header: EndpointIO.Header[?]
+          if header.name.equalsIgnoreCase(HeaderNames.Authorization) =>
+        firstAuth(ctx.endpoint.securityInput).map(_.challenge)
+      case _ => None
+
+  private def firstAuth(input: EndpointInput[?]): Option[EndpointInput.Auth[?, ?]] =
+    input match
+      case auth: EndpointInput.Auth[?, ?]        => Some(auth)
+      case EndpointInput.Pair(left, right, _, _) => firstAuth(left).orElse(firstAuth(right))
+      case EndpointInput.MappedPair(pair, _)     => firstAuth(pair)
+      case EndpointIO.Pair(left, right, _, _)    => firstAuth(left).orElse(firstAuth(right))
+      case EndpointIO.MappedPair(pair, _)        => firstAuth(pair)
+      case _                                     => None
 
   /**
    * Registra la excepción con el identificador de correlación y responde un 500 genérico. Es el

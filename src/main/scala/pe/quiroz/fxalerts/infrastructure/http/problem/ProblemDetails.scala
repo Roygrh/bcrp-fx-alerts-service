@@ -101,6 +101,30 @@ object ProblemDetails:
       errors = Some(errors)
     )
 
+  /**
+   * Sin credenciales o con un token inválido. Un único texto para todos los motivos de rechazo
+   * (ausente, mal formado, firma inválida, caducado, emisor o audiencia incorrectos): quien envía
+   * un token forjado no debe poder averiguar qué comprobación falló.
+   */
+  val unauthorized: ProblemDetails =
+    ProblemDetails(
+      `type` = typePrefix + "unauthorized",
+      title = "No autenticado",
+      status = StatusCode.Unauthorized.code,
+      detail = "Se requiere un token de acceso válido en la cabecera Authorization (Bearer)",
+      errors = None
+    )
+
+  /** Token válido pero sin el alcance que la operación exige. */
+  def forbidden(requiredScope: String): ProblemDetails =
+    ProblemDetails(
+      `type` = typePrefix + "forbidden",
+      title = "Alcance insuficiente",
+      status = StatusCode.Forbidden.code,
+      detail = s"El token no incluye el alcance requerido: $requiredScope",
+      errors = None
+    )
+
   val methodNotAllowed: ProblemDetails =
     ProblemDetails(
       `type` = typePrefix + "method-not-allowed",
@@ -138,6 +162,7 @@ object ProblemDetails:
     status match
       case StatusCode.NotFound         => notFound("No existe ningún recurso en la ruta indicada")
       case StatusCode.MethodNotAllowed => methodNotAllowed
+      case StatusCode.Unauthorized     => unauthorized
       case StatusCode.InternalServerError => internal
       case other                          =>
         ProblemDetails(

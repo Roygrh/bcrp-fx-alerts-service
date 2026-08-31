@@ -23,8 +23,14 @@ class DoobieAlertRepositorySuite extends CatsEffectSuite:
 
   private val createdAt = Instant.parse("2026-08-28T15:00:00Z")
 
+  private val owner = client("cliente-001")
+  private val other = client("cliente-002")
+
+  private def client(id: String): ClientId =
+    ClientId.from(id).fold(error => fail(s"Cliente de prueba inválido: ${error.message}"), identity)
+
   private def alert(
-      clientId: String,
+      clientId: ClientId,
       threshold: String = "3.80",
       createdAt: Instant = createdAt
   ): Alert =
@@ -80,32 +86,32 @@ class DoobieAlertRepositorySuite extends CatsEffectSuite:
 
   dbTest("create y findById devuelven la misma alerta, umbral y marcas de tiempo incluidos"):
     (repository, _) =>
-      val expected = alert("cliente-001", threshold = "3.7565")
+      val expected = alert(owner, threshold = "3.7565")
       for
         _     <- repository.create(expected)
-        found <- repository.findById(expected.id)
+        found <- repository.findById(owner, expected.id)
       yield assertEquals(found, Some(expected))
 
   dbTest("findById devuelve None para un identificador desconocido"): (repository, _) =>
-    repository.findById(AlertId(UUID.randomUUID())).map(found => assertEquals(found, None))
+    repository.findById(owner, AlertId(UUID.randomUUID())).map(found => assertEquals(found, None))
 
-  dbTest("findAll lista por fecha de creación y filtra por cliente"): (repository, _) =>
-    val older  = alert("cliente-001", createdAt = createdAt)
-    val newer  = alert("cliente-001", createdAt = createdAt.plusSeconds(60))
-    val other  = alert("cliente-002", createdAt = createdAt.plusSeconds(30))
-    val client = ClientId.from("cliente-001").toOption
-    for
-      _        <- List(newer, other, older).traverse_(repository.create)
-      all      <- repository.findAll(None)
-      filtered <- repository.findAll(client)
-      none     <- repository.findAll(ClientId.from("cliente-999").toOption)
-    yield
-      assertEquals(all, List(older, other, newer))
-      assertEquals(filtered, List(older, newer))
-      assertEquals(none, Nil)
+  dbTest("findAll lista solo las alertas del propietario, por fecha de creación"):
+    (repository, _) =>
+      val older = alert(owner, createdAt = createdAt)
+      val newer = alert(owner, createdAt = createdAt.plusSeconds(60))
+      val alien = alert(other, createdAt = createdAt.plusSeconds(30))
+      for
+        _    <- List(newer, alien, older).traverse_(repository.create)
+        mine <- repository.findAll(owner)
+        his  <- repository.findAll(other)
+        none <- repository.findAll(client("cliente-999"))
+      yield
+        assertEquals(mine, List(older, newer))
+        assertEquals(his, List(alien))
+        assertEquals(none, Nil)
 
   dbTest("update persiste la nueva configuración de una alerta existente"): (repository, _) =>
-    val original = alert("cliente-001")
+    val original = alert(owner)
     val updated  = original
       .update(
         series = BcrpSeries.UsdPenSbsSell,
@@ -118,34 +124,52 @@ class DoobieAlertRepositorySuite extends CatsEffectSuite:
     for
       _      <- repository.create(original)
       result <- repository.update(updated)
-      found  <- repository.findById(original.id)
+      found  <- repository.findById(owner, original.id)
     yield
       assertEquals(result, Right(()))
       assertEquals(found, Some(updated))
 
   dbTest("update devuelve AlertNotFound si la alerta no existe"): (repository, _) =>
-    val missing = alert("cliente-001")
+    val missing = alert(owner)
     repository
       .update(missing)
       .map(result => assertEquals(result, Left(DomainError.AlertNotFound(missing.id))))
 
   dbTest("delete elimina la alerta y una segunda eliminación devuelve AlertNotFound"):
     (repository, _) =>
-      val existing = alert("cliente-001")
+      val existing = alert(owner)
       for
         _      <- repository.create(existing)
-        first  <- repository.delete(existing.id)
-        found  <- repository.findById(existing.id)
-        second <- repository.delete(existing.id)
+        first  <- repository.delete(owner, existing.id)
+        found  <- repository.findById(owner, existing.id)
+        second <- repository.delete(owner, existing.id)
       yield
         assertEquals(first, Right(()))
         assertEquals(found, None)
         assertEquals(second, Left(DomainError.AlertNotFound(existing.id)))
 
+  // --- Aislamiento por cliente -----------------------------------------------------------------
+
+  dbTest("otro cliente no ve, no modifica ni elimina una alerta ajena, y esta queda intacta"):
+    (repository, _) =>
+      val existing = alert(owner)
+      val hijacked = existing.copy(clientId = other)
+      for
+        _       <- repository.create(existing)
+        found   <- repository.findById(other, existing.id)
+        updated <- repository.update(hijacked)
+        deleted <- repository.delete(other, existing.id)
+        intact  <- repository.findById(owner, existing.id)
+      yield
+        assertEquals(found, None)
+        assertEquals(updated, Left(DomainError.AlertNotFound(existing.id)))
+        assertEquals(deleted, Left(DomainError.AlertNotFound(existing.id)))
+        assertEquals(intact, Some(existing))
+
   // --- Restricciones de la base de datos -------------------------------------------------------
 
   dbTest("la base de datos rechaza un identificador duplicado"): (repository, transactor) =>
-    val existing = alert("cliente-001")
+    val existing = alert(owner)
     for
       _      <- repository.create(existing)
       result <- rawInsert(transactor, id = existing.id.value)

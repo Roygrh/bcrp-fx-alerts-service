@@ -8,8 +8,15 @@ import ciris.http4s.*
 import com.comcast.ip4s.{host, port, Host, Port}
 import org.http4s.Uri
 import org.http4s.implicits.uri
+import pe.quiroz.fxalerts.application.security.RegisteredClient
 import pe.quiroz.fxalerts.domain.rate.RateProvider
-import pe.quiroz.fxalerts.infrastructure.config.ConfigDecoders.{atLeast, providerList}
+import pe.quiroz.fxalerts.infrastructure.config.ConfigDecoders.{
+  atLeast,
+  clientList,
+  durationBetween,
+  providerList
+}
+import pe.quiroz.fxalerts.infrastructure.security.RsaKeyPem
 
 import scala.concurrent.duration.*
 
@@ -19,8 +26,9 @@ import scala.concurrent.duration.*
  * El origen de las variables se inyecta (`environment`) para que las pruebas puedan cargar la
  * configuración completa con un entorno explícito y determinista; en producción se usa el entorno
  * del proceso ([[ConfigLoader.load]]). Las variables sin valor por defecto son obligatorias; si
- * falta alguna, ciris reporta todas las ausentes en un único error al arrancar. `DB_PASSWORD` se
- * envuelve en [[ciris.Secret]] para que nunca aparezca en mensajes de error ni en `toString`.
+ * falta alguna, ciris reporta todas las ausentes en un único error al arrancar. `DB_PASSWORD` y
+ * `JWT_PRIVATE_KEY` se envuelven en [[ciris.Secret]] para que nunca aparezcan en mensajes de error
+ * ni en `toString`.
  *
  * Todos los miembros son `def`: cada `ConfigValue` es una descripción barata que se construye una
  * vez al cargar, y así ninguno puede observar a otro a medio inicializar, sea cual sea el orden en
@@ -111,8 +119,38 @@ final class ConfigLoader(environment: String => Option[String]):
         )
     }
 
+  /**
+   * `JWT_PRIVATE_KEY` es obligatoria y sin valor por defecto a propósito: sin clave configurada el
+   * servicio no arranca, en lugar de firmar con una clave efímera que nadie podría verificar ni
+   * rotar. `JWT_PUBLIC_KEY` es opcional (se deriva de la privada) y, si se indica, debe
+   * corresponderle. Las claves se validan al arrancar: formato PEM, tamaño mínimo y pareja.
+   */
+  private def jwt: ConfigValue[Effect, JwtConfig] =
+    (
+      variable("JWT_PRIVATE_KEY").secret,
+      variable("JWT_PUBLIC_KEY").option,
+      variable("JWT_ISSUER").default("bcrp-fx-alerts-service"),
+      variable("JWT_AUDIENCE").default("bcrp-fx-alerts-api"),
+      variable("JWT_TTL")
+        .as[FiniteDuration](using durationBetween(1.minute, 24.hours))
+        .default(15.minutes)
+    ).parTupled.flatMap { values =>
+      val (privateKey, publicKey, issuer, audience, ttl) = values
+      RsaKeyPem.pair(privateKey.value, publicKey) match
+        case Right(keys)   => ConfigValue.default(JwtConfig(keys, issuer, audience, ttl))
+        case Left(message) =>
+          ConfigValue.failed(ConfigError(s"JWT_PRIVATE_KEY / JWT_PUBLIC_KEY: $message"))
+    }
+
+  private def security: ConfigValue[Effect, SecurityConfig] =
+    (
+      jwt,
+      variable("OAUTH_CLIENTS").as[NonEmptyList[RegisteredClient]](using clientList)
+    ).parMapN(SecurityConfig.apply)
+
   def config: ConfigValue[Effect, AppConfig] =
-    (http, database, bcrp, exchangeRateApi, rateSources, rateCache).parMapN(AppConfig.apply)
+    (http, database, bcrp, exchangeRateApi, rateSources, rateCache, security)
+      .parMapN(AppConfig.apply)
 
   def load[F[_]: Async]: F[AppConfig] = config.load[F]
 
