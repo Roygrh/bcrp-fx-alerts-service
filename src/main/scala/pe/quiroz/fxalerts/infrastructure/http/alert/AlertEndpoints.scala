@@ -80,7 +80,9 @@ object AlertEndpoints:
       base.get
         .summary("Lista las alertas propias")
         .description(
-          "Devuelve las alertas del cliente autenticado ordenadas por fecha de creación ascendente."
+          "Devuelve las alertas del cliente autenticado ordenadas por fecha de creación " +
+            "ascendente y, a igualdad de fecha, por identificador. Ese desempate es estable pero " +
+            "no preserva el orden real de creación entre alertas registradas en el mismo instante."
         )
         .out(jsonBody[AlertListResponse].example(AlertListResponse.example))
     )
