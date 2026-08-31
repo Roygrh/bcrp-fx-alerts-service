@@ -110,6 +110,19 @@ object ProblemDetails:
       errors = None
     )
 
+  /**
+   * Una fuente externa de la que depende la operación no responde y no hay dato alternativo. El
+   * detalle nombra la capacidad afectada, nunca el error técnico.
+   */
+  def sourceUnavailable(detail: String): ProblemDetails =
+    ProblemDetails(
+      `type` = typePrefix + "source-unavailable",
+      title = "Fuente de datos no disponible",
+      status = StatusCode.ServiceUnavailable.code,
+      detail = detail,
+      errors = None
+    )
+
   /** Respuesta genérica para cualquier fallo no previsto; nunca incluye la causa. */
   val internal: ProblemDetails =
     ProblemDetails(
@@ -141,4 +154,10 @@ object ProblemDetails:
   val exampleValidation: ProblemDetails =
     validation(
       List(FieldError("threshold", "El umbral debe ser estrictamente positivo (recibido: 0)"))
+    )
+
+  val exampleSourceUnavailable: ProblemDetails =
+    sourceUnavailable(
+      "El tipo de cambio de la serie PD04640PD no está disponible en este momento; " +
+        "inténtelo más tarde"
     )

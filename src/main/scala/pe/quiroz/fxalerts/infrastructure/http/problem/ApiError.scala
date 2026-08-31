@@ -18,9 +18,10 @@ sealed trait ApiError extends Product with Serializable:
 
 object ApiError:
 
-  final case class BadRequest(problem: ProblemDetails) extends ApiError
-  final case class NotFound(problem: ProblemDetails)   extends ApiError
-  final case class Internal(problem: ProblemDetails)   extends ApiError
+  final case class BadRequest(problem: ProblemDetails)         extends ApiError
+  final case class NotFound(problem: ProblemDetails)           extends ApiError
+  final case class ServiceUnavailable(problem: ProblemDetails) extends ApiError
+  final case class Internal(problem: ProblemDetails)           extends ApiError
 
   /**
    * Punto único de traducción de errores de dominio a errores HTTP.
@@ -37,6 +38,13 @@ object ApiError:
         BadRequest(ProblemDetails.validation(List(FieldError("threshold", error.message))))
       case DomainError.InvalidClientId(_, _) =>
         BadRequest(ProblemDetails.validation(List(FieldError("clientId", error.message))))
+      case DomainError.ExchangeRateNotPublished(_) =>
+        NotFound(ProblemDetails.notFound(error.message))
+      // 503 y no 502/504: el cliente habla con este servicio, no con el BCRP, y este servicio no
+      // actúa como pasarela transparente. 503 expresa "temporalmente no disponible, reintente"
+      // sin revelar la topología aguas arriba, y es el mismo código que usa /health para DOWN.
+      case DomainError.ExchangeRateUnavailable(_) =>
+        ServiceUnavailable(ProblemDetails.sourceUnavailable(error.message))
 
   /**
    * Salida de error compartida por todos los endpoints de la API.
@@ -56,9 +64,16 @@ object ApiError:
       oneOfVariant(
         StatusCode.NotFound,
         ProblemDetails.body
-          .description("La alerta no existe")
+          .description("El recurso no existe (o no hay dato publicado para él)")
           .example(ProblemDetails.exampleNotFound)
           .map(NotFound.apply)(_.problem)
+      ),
+      oneOfVariant(
+        StatusCode.ServiceUnavailable,
+        ProblemDetails.body
+          .description("Una fuente externa no responde y no hay dato en caché; reintente más tarde")
+          .example(ProblemDetails.exampleSourceUnavailable)
+          .map(ServiceUnavailable.apply)(_.problem)
       ),
       oneOfVariant(
         StatusCode.InternalServerError,

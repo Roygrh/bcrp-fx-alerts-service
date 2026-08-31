@@ -7,6 +7,7 @@ import pe.quiroz.fxalerts.infrastructure.http.alert.AlertRoutes
 import pe.quiroz.fxalerts.infrastructure.http.health.HealthRoutes
 import pe.quiroz.fxalerts.infrastructure.http.middleware.RequestLogging
 import pe.quiroz.fxalerts.infrastructure.http.problem.ProblemHandlers
+import pe.quiroz.fxalerts.infrastructure.http.rate.RateRoutes
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.{Http4sServerInterpreter, Http4sServerOptions}
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
@@ -26,9 +27,12 @@ object HttpApi:
 
   def httpApp[F[_]: Async: Logger](
       healthRoutes: HealthRoutes[F],
-      alertRoutes: AlertRoutes[F]
+      alertRoutes: AlertRoutes[F],
+      rateRoutes: RateRoutes[F]
   ): HttpApp[F] =
-    fromEndpoints(healthRoutes.serverEndpoints ++ alertRoutes.serverEndpoints)
+    fromEndpoints(
+      healthRoutes.serverEndpoints ++ alertRoutes.serverEndpoints ++ rateRoutes.serverEndpoints
+    )
 
   /**
    * Construye la aplicación a partir de un conjunto arbitrario de endpoints. Las suites de pruebas

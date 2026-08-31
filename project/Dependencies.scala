@@ -22,6 +22,7 @@ object Dependencies {
 
   val http4s: Seq[ModuleID] = Seq(
     "org.http4s" %% "http4s-ember-server" % Versions.http4s,
+    "org.http4s" %% "http4s-ember-client" % Versions.http4s,
     "org.http4s" %% "http4s-dsl"          % Versions.http4s
   )
 
@@ -62,9 +63,12 @@ object Dependencies {
     "ch.qos.logback" % "logback-classic" % Versions.logback % Runtime
   )
 
+  // cats-effect-testkit aporta `TestControl`: reloj virtual para probar tiempos de espera,
+  // reintentos con espera creciente y vencimiento de caché sin dormir de verdad.
   val tests: Seq[ModuleID] = Seq(
-    "org.scalameta" %% "munit"             % Versions.munit,
-    "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect
+    "org.scalameta" %% "munit"               % Versions.munit,
+    "org.typelevel" %% "munit-cats-effect"   % Versions.munitCatsEffect,
+    "org.typelevel" %% "cats-effect-testkit" % Versions.catsEffect
   ).map(_ % Test)
 
   // Solo para el subproyecto `integration`: PostgreSQL efímero en Docker durante las pruebas.

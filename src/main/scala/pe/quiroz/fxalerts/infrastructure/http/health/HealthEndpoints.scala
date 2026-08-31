@@ -17,13 +17,24 @@ object HealthEndpoints:
       .in("health")
       .summary("Estado del servicio")
       .description(
-        "Devuelve el estado agregado del servicio y de sus dependencias. " +
-          "Responde 200 cuando todos los componentes están operativos y 503 en caso contrario."
+        "Devuelve el estado agregado del servicio y de sus componentes. Responde 200 tanto con " +
+          "`UP` como con `DEGRADED` (el servicio sigue atendiendo, aunque con capacidad mermada: " +
+          "tipo de cambio servido desde caché o desde la fuente de respaldo no oficial) y 503 con " +
+          "`DOWN` (la base de datos no responde). `rates.source` y `rates.official` indican qué " +
+          "fuente está sirviendo el tipo de cambio. Un reinicio solo procede ante `DOWN`."
       )
       .tag("Operación")
       .out(
         statusCode(StatusCode.Ok)
-          .and(jsonBody[HealthResponse].example(HealthResponse.exampleUp))
+          .and(
+            jsonBody[HealthResponse]
+              .examples(
+                List(
+                  EndpointIO.Example.of(HealthResponse.exampleUp, name = Some("Operativo")),
+                  EndpointIO.Example.of(HealthResponse.exampleDegraded, name = Some("Degradado"))
+                )
+              )
+          )
       )
       .errorOut(
         statusCode(StatusCode.ServiceUnavailable)
