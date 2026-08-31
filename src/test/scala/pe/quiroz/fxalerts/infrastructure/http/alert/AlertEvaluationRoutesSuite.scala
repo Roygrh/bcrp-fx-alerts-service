@@ -89,10 +89,18 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
   private def items(json: Json): List[Json] =
     json.hcursor.downField("items").values.map(_.toList).getOrElse(Nil)
 
-  private def outcomes(json: Json): List[(Option[String], Option[String])] =
-    items(json).map(item =>
-      (item.hcursor.downField("alert").get[String]("id").toOption, stringAt(item, "outcome"))
-    )
+  /**
+   * Resultado por identificador de alerta. Es un mapa a propósito: dos alertas registradas en el
+   * mismo instante comparten `createdAt` y su orden relativo en el listado (desempate por
+   * identificador aleatorio) no es el de creación, así que las pruebas no deben depender de él.
+   */
+  private def outcomes(json: Json): Map[String, String] =
+    items(json).flatMap { item =>
+      for
+        id      <- item.hcursor.downField("alert").get[String]("id").toOption
+        outcome <- stringAt(item, "outcome")
+      yield id -> outcome
+    }.toMap
 
   private def assertProblem(response: Response[IO], status: Status): Unit =
     assertEquals(response.status, status)
@@ -142,7 +150,7 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
 
   /**
    * Cuatro alertas del propietario frente a 3.523: dos disparadas, una no y una inactiva. Devuelve
-   * los identificadores en orden de creación.
+   * los identificadores.
    */
   private def ownerAlerts(app: HttpApp[IO]): IO[List[String]] =
     for
@@ -177,15 +185,19 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
         assertEquals(rate.downField("source").get[Boolean]("official").toOption, Some(true))
         assertEquals(
           outcomes(json),
-          List(
-            Some(ids(0)) -> Some("TRIGGERED"),
-            Some(ids(1)) -> Some("TRIGGERED"),
-            Some(ids(2)) -> Some("NOT_TRIGGERED"),
-            Some(ids(3)) -> Some("INACTIVE")
+          Map(
+            ids(0) -> "TRIGGERED",
+            ids(1) -> "TRIGGERED",
+            ids(2) -> "NOT_TRIGGERED",
+            ids(3) -> "INACTIVE"
           )
         )
-        // Cada elemento anida la representación habitual de la alerta.
-        val first = items(json).head.hcursor.downField("alert")
+        // Cada elemento anida la representación habitual de la alerta; se localiza por id porque
+        // el orden entre alertas con el mismo createdAt no es el de creación.
+        val first = items(json)
+          .map(_.hcursor.downField("alert"))
+          .find(_.get[String]("id").toOption.contains(ids(0)))
+          .getOrElse(fail(s"items no contiene la alerta ${ids(0)}"))
         assertEquals(first.get[String]("clientId").toOption, Some(owner))
         assertEquals(first.get[BigDecimal]("threshold").toOption, Some(BigDecimal("3.5")))
         assertEquals(first.get[String]("direction").toOption, Some("ABOVE"))
@@ -243,9 +255,9 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
         mine    <- app.run(evaluation(owner)).flatMap(bodyJson)
         theirs  <- app.run(evaluation(other)).flatMap(bodyJson)
       yield
-        assertEquals(outcomes(mine).map(_._1), ids.map(Some(_)))
-        assert(!outcomes(mine).map(_._1).contains(Some(foreign)))
-        assertEquals(outcomes(theirs), List(Some(foreign) -> Some("TRIGGERED")))
+        assertEquals(outcomes(mine).keySet, ids.toSet)
+        assert(!outcomes(mine).contains(foreign))
+        assertEquals(outcomes(theirs), Map(foreign -> "TRIGGERED"))
     }
 
   // --- Calidad del dato ------------------------------------------------------------------------
@@ -274,7 +286,7 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
         )
         assertEquals(
           outcomes(json),
-          List(Some(above350) -> Some("NOT_TRIGGERED"), Some(below360) -> Some("TRIGGERED"))
+          Map(above350 -> "NOT_TRIGGERED", below360 -> "TRIGGERED")
         )
     }
 
@@ -299,7 +311,7 @@ class AlertEvaluationRoutesSuite extends CatsEffectSuite:
               json.hcursor.downField("rate").downField("source").get[Boolean]("official").toOption,
               Some(provider.official)
             )
-            assertEquals(outcomes(json), List(Some(id) -> Some("TRIGGERED")))
+            assertEquals(outcomes(json), Map(id -> "TRIGGERED"))
         }
     }
 

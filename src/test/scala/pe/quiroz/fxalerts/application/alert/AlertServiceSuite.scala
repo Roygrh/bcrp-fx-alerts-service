@@ -1,11 +1,14 @@
 package pe.quiroz.fxalerts.application.alert
 
 import cats.effect.IO
+import cats.effect.testkit.TestControl
 import munit.CatsEffectSuite
 import pe.quiroz.fxalerts.domain.DomainError
 import pe.quiroz.fxalerts.domain.alert.*
 
 import java.util.UUID
+
+import scala.concurrent.duration.*
 
 class AlertServiceSuite extends CatsEffectSuite:
 
@@ -89,16 +92,26 @@ class AlertServiceSuite extends CatsEffectSuite:
     }
 
   test("list devuelve solo las alertas del propietario, en orden de creación"):
-    withService { (service, _) =>
-      for
-        first  <- service.create(owner, createCommand).flatMap(rightOrFail)
-        _      <- service.create(other, createCommand).flatMap(rightOrFail)
-        second <- service.create(owner, createCommand).flatMap(rightOrFail)
-        mine   <- service.list(owner)
-        none   <- service.list(ClientId.from("cliente-999").toOption.get)
-      yield
-        assertEquals(mine.map(_.id), List(first.id, second.id))
-        assertEquals(none, Nil)
+    // El listado ordena por (createdAt, id) y el identificador es aleatorio: entre alertas que
+    // comparten createdAt el desempate no preserva el orden de creación. Con el reloj real las
+    // creaciones consecutivas pueden caer en el mismo instante, así que la prueba corre bajo
+    // TestControl: cada pausa virtual garantiza marcas de tiempo distintas, que es la premisa de
+    // "orden de creación", sin dormir de verdad.
+    TestControl.executeEmbed {
+      withService { (service, _) =>
+        for
+          first  <- service.create(owner, createCommand).flatMap(rightOrFail)
+          _      <- IO.sleep(1.milli)
+          _      <- service.create(other, createCommand).flatMap(rightOrFail)
+          _      <- IO.sleep(1.milli)
+          second <- service.create(owner, createCommand).flatMap(rightOrFail)
+          mine   <- service.list(owner)
+          none   <- service.list(ClientId.from("cliente-999").toOption.get)
+        yield
+          assert(first.createdAt.isBefore(second.createdAt))
+          assertEquals(mine.map(_.id), List(first.id, second.id))
+          assertEquals(none, Nil)
+      }
     }
 
   // --- update ----------------------------------------------------------------------------------

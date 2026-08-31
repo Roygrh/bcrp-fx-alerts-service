@@ -18,8 +18,8 @@ import java.util.UUID
  * algún día hace falta una ruptura del contrato.
  *
  * Cada endpoint es un valor puro del que se derivan las rutas http4s y la documentación OpenAPI; la
- * salida de error común ([[ApiError.output]]) documenta 400, 401, 403, 404 y 500 en formato Problem
- * Details.
+ * salida de error común ([[ApiError.output]]) documenta 400, 401, 403, 404, 503 y 500 en formato
+ * Problem Details.
  *
  * Todos los endpoints exigen un token: las lecturas el alcance `alerts:read` y las escrituras
  * `alerts:write`. El recurso está acotado al cliente autenticado: no existe forma de nombrar a otro

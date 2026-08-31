@@ -27,7 +27,12 @@ trait AlertRepository[F[_]]:
   /** Recupera una alerta del cliente indicado, o `None` si no existe o pertenece a otro cliente. */
   def findById(owner: ClientId, id: AlertId): F[Option[Alert]]
 
-  /** Lista las alertas del cliente indicado ordenadas por fecha de creación ascendente. */
+  /**
+   * Lista las alertas del cliente indicado, ordenadas por fecha de creación ascendente y, a
+   * igualdad de fecha, por identificador. El desempate hace el orden total y estable entre
+   * lecturas, pero no preserva el orden real de creación entre alertas que comparten la marca de
+   * tiempo: el identificador es aleatorio y no crece con el tiempo.
+   */
   def findAll(owner: ClientId): F[List[Alert]]
 
   /**

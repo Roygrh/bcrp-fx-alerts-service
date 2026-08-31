@@ -10,8 +10,8 @@ import pe.quiroz.fxalerts.domain.alert.ClientId
  * Adaptador de [[ClientRegistry]] sobre la lista de clientes cargada de la configuración.
  *
  * Es inmutable: dar de alta o de baja un cliente exige reiniciar el servicio. Es una limitación
- * asumida para este paso; un registro persistente con alta, rotación de secretos y revocación es un
- * problema aparte.
+ * asumida en este alcance; un registro persistente con alta, rotación de secretos y revocación es
+ * un problema aparte.
  */
 final class StaticClientRegistry[F[_]: Applicative](clients: NonEmptyList[RegisteredClient])
     extends ClientRegistry[F]:

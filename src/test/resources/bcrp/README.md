@@ -9,7 +9,7 @@ fecha en formato `dd.Mmm.aa` (mes abreviado en español) y `periods[].values[i]`
 `"n.d."` en los días sin dato (fines de semana y feriados; el 30 de agosto de 2026 es domingo y,
 además, festivo).
 
-Importante: la API está detrás de un proxy de seguridad (Imperva) que responde a los clientes no
+Importante: la API está detrás de un proxy de seguridad (Imperva) que, de forma intermitente, responde a los clientes no
 reconocidos con una página HTML de desafío en lugar del JSON. Esta muestra se reconstruyó a partir
 de la estructura que consumen clientes públicos de la API y de la documentación oficial, no de una
 captura directa desde este entorno. Para sustituirla por una captura real basta con abrir la URL
